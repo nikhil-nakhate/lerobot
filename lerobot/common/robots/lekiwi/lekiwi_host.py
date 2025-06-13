@@ -22,6 +22,8 @@ import time
 import cv2
 import zmq
 
+from lerobot.common.constants import OBS_IMAGES, OBS_STATE
+
 from .config_lekiwi import LeKiwiConfig, LeKiwiHostConfig
 from .lekiwi import LeKiwi
 
@@ -48,6 +50,8 @@ class LeKiwiHost:
 
 
 def main():
+    from lerobot.common.utils.utils import init_logging
+    init_logging()
     logging.info("Configuring LeKiwi")
     robot_config = LeKiwiConfig()
     robot = LeKiwi(robot_config)
@@ -71,9 +75,17 @@ def main():
             try:
                 msg = host.zmq_cmd_socket.recv_string(zmq.NOBLOCK)
                 data = dict(json.loads(msg))
-                _action_sent = robot.send_action(data)
+                action_sent = robot.send_action(data)  # This might be clipped by max_relative_target
                 last_cmd_time = time.time()
                 watchdog_active = False
+                
+                # Send back the actual action sent (which might be clipped) and current observation
+                formatted_action = {key: float(val) for key, val in action_sent.items()}
+                response = {
+                    "action_sent": formatted_action,
+                    **formatted_observation
+                }
+                host.zmq_observation_socket.send_string(json.dumps(response), flags=zmq.NOBLOCK)
             except zmq.Again:
                 if not watchdog_active:
                     logging.warning("No command available")
@@ -88,21 +100,26 @@ def main():
                 watchdog_active = True
                 robot.stop_base()
 
+            # Get observation from robot and format it for sending
             last_observation = robot.get_observation()
+            formatted_observation = {}
 
-            # Encode ndarrays to base64 strings
-            for cam_key, _ in robot.cameras.items():
-                ret, buffer = cv2.imencode(
-                    ".jpg", last_observation[cam_key], [int(cv2.IMWRITE_JPEG_QUALITY), 90]
-                )
-                if ret:
-                    last_observation[cam_key] = base64.b64encode(buffer).decode("utf-8")
-                else:
-                    last_observation[cam_key] = ""
+            # Format state dict - convert all values to float for JSON serialization
+            if OBS_STATE in last_observation:
+                formatted_observation[OBS_STATE] = {key: float(val) for key, val in last_observation[OBS_STATE].items()}
 
-            # Send the observation to the remote agent
+            # Format camera frames - encode as base64 JPEG
+            for key, val in last_observation.items():
+                if key.startswith(OBS_IMAGES):
+                    ret, buffer = cv2.imencode(".jpg", val, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+                    if ret:
+                        formatted_observation[key] = base64.b64encode(buffer).decode("utf-8")
+                    else:
+                        formatted_observation[key] = ""
+
+            # Send the formatted observation to the remote agent
             try:
-                host.zmq_observation_socket.send_string(json.dumps(last_observation), flags=zmq.NOBLOCK)
+                host.zmq_observation_socket.send_string(json.dumps(formatted_observation), flags=zmq.NOBLOCK)
             except zmq.Again:
                 logging.info("Dropping observation, no client connected")
 

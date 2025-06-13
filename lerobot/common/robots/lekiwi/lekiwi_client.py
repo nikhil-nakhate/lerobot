@@ -25,6 +25,7 @@ import numpy as np
 import torch
 import zmq
 
+from lerobot.common.constants import OBS_IMAGES, OBS_STATE
 from lerobot.common.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 
 from ..robot import Robot
@@ -91,12 +92,16 @@ class LeKiwiClient(Robot):
         return tuple(self._state_ft.keys())
 
     @cached_property
-    def _cameras_ft(self) -> dict[str, tuple[int, int, int]]:
-        return {name: (cfg.height, cfg.width, 3) for name, cfg in self.config.cameras.items()}
+    def _cameras_ft(self) -> dict[str, tuple]:
+        return {
+            "front": (640, 480, 3),
+            "wrist": (640, 480, 3),
+        }
 
     @cached_property
     def observation_features(self) -> dict[str, type | tuple]:
-        return {**self._state_ft, **self._cameras_ft}
+        features = {**self._state_ft, **self._cameras_ft}
+        return features
 
     @cached_property
     def action_features(self) -> dict[str, type]:
@@ -177,7 +182,11 @@ class LeKiwiClient(Robot):
             return None
 
     def _decode_image_from_b64(self, image_b64: str) -> Optional[np.ndarray]:
-        """Decodes a base64 encoded image string to an OpenCV image."""
+        """Decodes a base64 encoded image string to an OpenCV image.
+        
+        Returns:
+            np.ndarray: Image in (640, 480, 3) format for dataset compatibility
+        """
         if not image_b64:
             return None
         try:
@@ -186,6 +195,14 @@ class LeKiwiClient(Robot):
             frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
             if frame is None:
                 logging.warning("cv2.imdecode returned None for an image.")
+                return None
+            
+            # OpenCV reads in BGR, convert to RGB
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Transpose from (H, W, C) to (W, H, C) format
+            frame = frame.transpose(1, 0, 2)
+            
             return frame
         except (TypeError, ValueError) as e:
             logging.error(f"Error decoding base64 image data: {e}")
@@ -194,27 +211,36 @@ class LeKiwiClient(Robot):
     def _remote_state_from_obs(
         self, observation: Dict[str, Any]
     ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
-        """Extracts frames, and state from the parsed observation."""
-        flat_state = {key: value for key, value in observation.items() if key in self._state_ft}
-
-        state_vec = np.array(
-            [flat_state.get(k, 0.0) for k in self._state_order],
-            dtype=np.float32,
-        )
+        """Extracts frames and state from the parsed observation, maintaining LeKiwi's format."""
+        # The host sends motor states at top level
+        state_dict = {}
+        for key in [
+            # Arm motor positions
+            "arm_shoulder_pan.pos",
+            "arm_shoulder_lift.pos",
+            "arm_elbow_flex.pos",
+            "arm_wrist_flex.pos",
+            "arm_wrist_roll.pos",
+            "arm_gripper.pos",
+            # Base velocities
+            "x.vel",
+            "y.vel",
+            "theta.vel",
+        ]:
+            state_dict[key] = observation.get(key, 0.0)  # Use 0.0 as default if key not found
 
         # Decode images
-        image_observation = {
-            f"observation.images.{key}": value
-            for key, value in observation.items()
-            if key in self._cameras_ft
-        }
+        image_observation = {k: v for k, v in observation.items() if k.startswith(OBS_IMAGES)}
         current_frames: Dict[str, np.ndarray] = {}
-        for cam_name, image_b64 in image_observation.items():
+        for full_cam_name, image_b64 in image_observation.items():
             frame = self._decode_image_from_b64(image_b64)
             if frame is not None:
+                # Extract camera name (e.g. 'front' from 'images.front')
+                cam_name = full_cam_name.removeprefix(f"{OBS_IMAGES}.")
                 current_frames[cam_name] = frame
 
-        return current_frames, {"observation.state": state_vec}
+        # Return both the frames and state dict with motor states at top level for dataset compatibility
+        return current_frames, state_dict
 
     def _get_data(self) -> Tuple[Dict[str, np.ndarray], Dict[str, Any], Dict[str, Any]]:
         """
@@ -255,21 +281,27 @@ class LeKiwiClient(Robot):
         """
         Capture observations from the remote robot: current follower arm positions,
         present wheel speeds (converted to body-frame velocities: x, y, theta),
-        and a camera frame. Receives over ZMQ, translate to body-frame vel
+        and camera frames. Receives over ZMQ, matches LeKiwi's API format.
         """
-        if not self._is_connected:
+        if not self.is_connected:
             raise DeviceNotConnectedError("LeKiwiClient is not connected. You need to run `robot.connect()`.")
 
-        frames, obs_dict = self._get_data()
+        frames, state_dict = self._get_data()
 
-        # Loop over each configured camera
-        for cam_name, frame in frames.items():
-            if frame is None:
-                logging.warning("Frame is None")
-                frame = np.zeros((640, 480, 3), dtype=np.uint8)
-            obs_dict[cam_name] = torch.from_numpy(frame)
+        # Format observation to match LeKiwi's API and dataset requirements
+        observation = {}
 
-        return obs_dict
+        # Add motor states at the root for dataset compatibility
+        observation.update(state_dict)
+
+        # Also add motor states under observation.state for API compatibility
+        observation[OBS_STATE] = state_dict
+
+        # Add camera frames with observation.images prefix
+        for key, value in frames.items():
+            observation[key] = value
+
+        return observation
 
     def _from_keyboard_to_base_action(self, pressed_keys: np.ndarray):
         # Speed control
@@ -323,11 +355,20 @@ class LeKiwiClient(Robot):
                 "ManipulatorRobot is not connected. You need to run `robot.connect()`."
             )
 
-        self.zmq_cmd_socket.send_string(json.dumps(action))  # action is in motor space
-
-        # TODO(Steven): Remove the np conversion when it is possible to record a non-numpy array value
-        actions = np.array([action.get(k, 0.0) for k in self._state_order], dtype=np.float32)
-        return {"action": actions}
+        # Send action to host
+        self.zmq_cmd_socket.send_string(json.dumps(action))
+        
+        # Wait for response with actual action sent (which might be clipped)
+        try:
+            response_msg = self.zmq_observation_socket.recv_string()
+            response = json.loads(response_msg)
+            if "action_sent" in response:
+                return response["action_sent"]
+        except zmq.Again:
+            logging.warning("No response from host about action sent")
+        
+        # If no response received, return original action
+        return action
 
     def disconnect(self):
         """Cleans ZMQ comms"""
