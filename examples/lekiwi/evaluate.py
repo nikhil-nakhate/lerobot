@@ -6,7 +6,7 @@ from lerobot.common.utils.utils import get_safe_torch_device
 
 NB_CYCLES_CLIENT_CONNECTION = 1000
 
-robot_config = LeKiwiClientConfig(remote_ip="172.18.134.136", id="lekiwi")
+robot_config = LeKiwiClientConfig(remote_ip="192.168.86.29", id="rosey")
 robot = LeKiwiClient(robot_config)
 
 robot.connect()

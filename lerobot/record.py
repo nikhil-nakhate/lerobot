@@ -34,11 +34,12 @@ python -m lerobot.record \
 
 import logging
 import time
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from pathlib import Path
+import numpy as np
 from pprint import pformat
 
-import numpy as np
 import rerun as rr
 
 from lerobot.common.cameras import (  # noqa: F401
@@ -51,10 +52,14 @@ from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.common.datasets.utils import build_dataset_frame, hw_to_dataset_features
 from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.pretrained import PreTrainedPolicy
+from lerobot.common.teleoperators.keyboard import KeyboardTeleop, KeyboardTeleopConfig
+from lerobot.common.robots.lekiwi import LeKiwiClient, LeKiwiClientConfig, LeKiwiConfig, LeKiwi
+import copy
 from lerobot.common.robots import (  # noqa: F401
     Robot,
     RobotConfig,
     koch_follower,
+    lekiwi,
     make_robot_from_config,
     so100_follower,
     so101_follower,
@@ -131,6 +136,8 @@ class RecordConfig:
     teleop: TeleoperatorConfig | None = None
     # Whether to control the robot with a policy
     policy: PreTrainedConfig | None = None
+    # Dataset statistics for policy normalization
+    dataset_stats: dict[str, dict[str, list[float]]] | None = None
     # Display all cameras on screen
     display_data: bool = False
     # Use vocal synthesis to read events.
@@ -139,14 +146,14 @@ class RecordConfig:
     resume: bool = False
 
     def __post_init__(self):
-        if self.teleop is not None and self.policy is not None:
-            raise ValueError("Choose either a policy or a teleoperator to control the robot")
+        # if bool(self.teleop) == bool(self.policy):
+        #     raise ValueError("Choose either a policy or a teleoperator to control the robot")
 
         # HACK: We parse again the cli args here to get the pretrained path if there was one.
         policy_path = parser.get_path_arg("policy")
         if policy_path:
-            cli_overrides = parser.get_cli_overrides("policy")
-            self.policy = PreTrainedConfig.from_pretrained(policy_path, cli_overrides=cli_overrides)
+            # Load policy config from pretrained path
+            self.policy = PreTrainedConfig.from_pretrained(policy_path)
             self.policy.pretrained_path = policy_path
 
     @classmethod
@@ -232,7 +239,9 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
     if cfg.display_data:
         _init_rerun(session_name="recording")
 
-    robot = make_robot_from_config(cfg.robot)
+    # robot = make_robot_from_config(cfg.robot)
+    robot_config = LeKiwiClientConfig(remote_ip="192.168.86.29", id="rosey")
+    robot = LeKiwiClient(robot_config)
     teleop = make_teleoperator_from_config(cfg.teleop) if cfg.teleop is not None else None
 
     action_features = hw_to_dataset_features(robot.action_features, "action", cfg.dataset.video)
@@ -262,11 +271,23 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             features=dataset_features,
             use_videos=cfg.dataset.video,
             image_writer_processes=cfg.dataset.num_image_writer_processes,
-            image_writer_threads=cfg.dataset.num_image_writer_threads_per_camera * len(robot.cameras),
+            image_writer_threads=cfg.dataset.num_image_writer_threads_per_camera * 2,
         )
 
     # Load pretrained policy
-    policy = None if cfg.policy is None else make_policy(cfg.policy, ds_meta=dataset.meta)
+    if cfg.policy is not None:
+        # If dataset_stats were provided via CLI, use those instead of dataset.meta.stats
+        ds_meta = dataset.meta
+        if hasattr(cfg, "dataset_stats") and cfg.dataset_stats is not None:
+            ds_meta = deepcopy(dataset.meta)
+            # Convert lists to numpy arrays
+            stats = {}
+            for key, stat in cfg.dataset_stats.items():
+                stats[key] = {k: np.array(v) for k, v in stat.items()}
+            ds_meta.stats = stats
+        policy = make_policy(cfg.policy, ds_meta=ds_meta)
+    else:
+        policy = None
 
     robot.connect()
     if teleop is not None:

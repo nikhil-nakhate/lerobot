@@ -20,21 +20,10 @@ from lerobot.common.cameras.opencv.configuration_opencv import OpenCVCameraConfi
 from ..config import RobotConfig
 
 
-def lekiwi_cameras_config() -> dict[str, CameraConfig]:
-    return {
-        "front": OpenCVCameraConfig(
-            index_or_path="/dev/video0", fps=30, width=640, height=480, rotation=Cv2Rotation.ROTATE_180
-        ),
-        "wrist": OpenCVCameraConfig(
-            index_or_path="/dev/video2", fps=30, width=480, height=640, rotation=Cv2Rotation.ROTATE_90
-        ),
-    }
-
-
 @RobotConfig.register_subclass("lekiwi")
 @dataclass
 class LeKiwiConfig(RobotConfig):
-    port: str = "/dev/ttyACM0"  # port to connect to the bus
+    port = "/dev/ttyACM0"  # port to connect to the bus
 
     disable_torque_on_disconnect: bool = True
 
@@ -43,7 +32,14 @@ class LeKiwiConfig(RobotConfig):
     # the number of motors in your follower arms.
     max_relative_target: int | None = None
 
-    cameras: dict[str, CameraConfig] = field(default_factory=lekiwi_cameras_config)
+    cameras: dict[str, CameraConfig] = field(
+        default_factory=lambda: {
+            "front": OpenCVCameraConfig(index_or_path="/dev/video0", fps=30, width=640, height=480, rotation=Cv2Rotation.ROTATE_180),
+            "wrist": OpenCVCameraConfig(
+                index_or_path="/dev/video1", fps=30, width=640, height=480
+            ),
+        }
+    )
 
     # Set to `True` for backward compatibility with previous policies/dataset
     use_degrees: bool = False
@@ -69,9 +65,16 @@ class LeKiwiHostConfig:
 @dataclass
 class LeKiwiClientConfig(RobotConfig):
     # Network Configuration
-    remote_ip: str
+    remote_ip: str = "192.168.86.29"
     port_zmq_cmd: int = 5555
     port_zmq_observations: int = 5556
+
+    # Local camera configuration
+    use_local_camera: bool = False
+    local_camera_port: str = "/dev/video0"
+    local_camera_fps: int = 30
+    local_camera_width: int = 640
+    local_camera_height: int = 480
 
     teleop_keys: dict[str, str] = field(
         default_factory=lambda: {
@@ -89,8 +92,6 @@ class LeKiwiClientConfig(RobotConfig):
             "quit": "q",
         }
     )
-
-    cameras: dict[str, CameraConfig] = field(default_factory=lekiwi_cameras_config)
 
     polling_timeout_ms: int = 15
     connect_timeout_s: int = 5
