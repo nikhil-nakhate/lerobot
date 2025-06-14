@@ -34,9 +34,9 @@ class LeKiwiConfig(RobotConfig):
 
     cameras: dict[str, CameraConfig] = field(
         default_factory=lambda: {
-            "front": OpenCVCameraConfig(index_or_path="/dev/video0", fps=30, width=640, height=480, rotation=Cv2Rotation.ROTATE_180),
+            "front": OpenCVCameraConfig(index_or_path="/dev/video1", fps=30, width=640, height=480, rotation=Cv2Rotation.ROTATE_180),
             "wrist": OpenCVCameraConfig(
-                index_or_path="/dev/video1", fps=30, width=640, height=480
+                index_or_path="/dev/video0", fps=30, width=640, height=480
             ),
         }
     )
@@ -71,7 +71,7 @@ class LeKiwiClientConfig(RobotConfig):
 
     # Local camera configuration
     use_local_camera: bool = False
-    local_camera_port: str = "/dev/video0"
+    local_camera_port: str = "/dev/video2"
     local_camera_fps: int = 30
     local_camera_width: int = 640
     local_camera_height: int = 480

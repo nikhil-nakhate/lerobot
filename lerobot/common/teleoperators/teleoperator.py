@@ -42,6 +42,7 @@ class Teleoperator(abc.ABC):
         self.calibration_fpath = self.calibration_dir / f"{self.id}.json"
         print(self.calibration_fpath)
         self.calibration: dict[str, MotorCalibration] = {}
+        self.calibration_fpath  = self.calibration_dir / f"rosey_master.json"
         if self.calibration_fpath.is_file():
             self._load_calibration()
 

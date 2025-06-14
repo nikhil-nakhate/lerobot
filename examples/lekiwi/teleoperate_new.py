@@ -11,7 +11,7 @@ robot_config = LeKiwiClientConfig(
 )
 
 teleop__arm_config = SO100LeaderConfig(
-    port="/dev/tty.usbmodem58760431551",
+    port="/dev/ttyACM0",
     id="rosey_master",
 )
 

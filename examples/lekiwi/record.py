@@ -1,4 +1,5 @@
 import time
+import numpy as np
 
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.common.datasets.utils import hw_to_dataset_features
@@ -9,13 +10,13 @@ from lerobot.common.teleoperators.so100_leader import SO100Leader, SO100LeaderCo
 
 NB_CYCLES_CLIENT_CONNECTION = 250
 
-leader_arm_config = SO100LeaderConfig(port="/dev/tty.usbmodem58760431551")
+leader_arm_config = SO100LeaderConfig(port="/dev/ttyACM0")
 leader_arm = SO100Leader(leader_arm_config)
 
 keyboard_config = KeyboardTeleopConfig()
 keyboard = KeyboardTeleop(keyboard_config)
 
-robot_config = LeKiwiClientConfig(remote_ip="172.18.134.136", id="lekiwi")
+robot_config = LeKiwiClientConfig(remote_ip="192.168.86.29", id="rosey_master")
 robot = LeKiwiClient(robot_config)
 
 action_features = hw_to_dataset_features(robot.action_features, "action")
@@ -23,7 +24,7 @@ obs_features = hw_to_dataset_features(robot.observation_features, "observation")
 dataset_features = {**action_features, **obs_features}
 
 dataset = LeRobotDataset.create(
-    repo_id="user/lekiwi" + str(int(time.time())),
+    repo_id="nikx-vla/lekiwi" + str(int(time.time())),
     fps=10,
     features=dataset_features,
     robot_type=robot.name,
@@ -51,9 +52,27 @@ while i < NB_CYCLES_CLIENT_CONNECTION:
     action_sent = robot.send_action(action)
     observation = robot.get_observation()
 
-    frame = {**action_sent, **observation}
-    task = "Dummy Example Task Dataset"
+    # Convert state dict to numpy array in the correct order
+    print("Full observation:", observation)
+    
+    # Initialize state dict with zeros if empty
+    state_dict = observation.get('observation.state', {})
+    if not state_dict:
+        print("Warning: No state information received, using zeros")
+        state_dict = {k: 0.0 for k in robot._state_order}
+    
+    # Create state array with default values for missing keys
+    state_array = np.array([state_dict.get(k, 0.0) for k in robot._state_order], dtype=np.float32)
 
+    # Create the frame with the correct feature structure
+    frame = {
+        'action': np.array(list(action_sent.values()), dtype=np.float32),
+        'observation.state': state_array,
+        'observation.images.front': np.zeros((640, 480, 3), dtype=np.uint8),  # Placeholder image
+        'observation.images.wrist': np.zeros((640, 480, 3), dtype=np.uint8)   # Placeholder image
+    }
+    
+    task = "Dummy Example Task Dataset"
     dataset.add_frame(frame, task)
     i += 1
 
@@ -64,4 +83,4 @@ keyboard.disconnect()
 
 print("Uploading dataset to the hub")
 dataset.save_episode()
-dataset.push_to_hub()
+# dataset.push_to_hub()
