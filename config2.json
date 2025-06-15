@@ -29,8 +29,10 @@
     "dataset": {
         "repo_id": "nikx-vla/lekiwi_data",
         "single_task": "Put lego brick into the transparent box",
-        "fps": 30,
-        "episode_time_s": 60,
+        "fps": 10,
+        "episode_time_s": 30,
+        "reset_time_s": 20,
+        "num_episodes": 50,
         "video": true,
         "push_to_hub": true
     },

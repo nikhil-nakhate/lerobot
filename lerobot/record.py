@@ -264,7 +264,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
         # Create empty dataset or load existing saved episodes
         sanity_check_dataset_name(cfg.dataset.repo_id, cfg.policy)
         dataset = LeRobotDataset.create(
-            cfg.dataset.repo_id,
+            cfg.dataset.repo_id + str(int(time.time())),
             cfg.dataset.fps,
             root=cfg.dataset.root,
             robot_type=robot.name,
