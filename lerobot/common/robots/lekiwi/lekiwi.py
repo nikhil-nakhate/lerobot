@@ -65,8 +65,8 @@ class LeKiwi(Robot):
                 "arm_gripper": Motor(6, "sts3215", MotorNormMode.RANGE_0_100),
                 # base
                 "base_left_wheel": Motor(7, "sts3215", MotorNormMode.RANGE_M100_100),
-                "base_right_wheel": Motor(8, "sts3215", MotorNormMode.RANGE_M100_100),
-                "base_back_wheel": Motor(9, "sts3215", MotorNormMode.RANGE_M100_100),
+                "base_right_wheel": Motor(9, "sts3215", MotorNormMode.RANGE_M100_100),
+                "base_back_wheel": Motor(8, "sts3215", MotorNormMode.RANGE_M100_100),
             },
             calibration=self.calibration,
         )
