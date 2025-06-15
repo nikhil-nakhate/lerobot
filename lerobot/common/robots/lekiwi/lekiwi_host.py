@@ -26,6 +26,7 @@ from lerobot.common.constants import OBS_IMAGES, OBS_STATE
 
 from .config_lekiwi import LeKiwiConfig, LeKiwiHostConfig
 from .lekiwi import LeKiwi
+from pathlib import Path
 
 
 class LeKiwiHost:
