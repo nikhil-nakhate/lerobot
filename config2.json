@@ -1,18 +1,24 @@
 {
+    "teleop": {
+        "type": "lekiwi",
+        "arm_port": "/dev/ttyACM0",
+        "arm_id": "rosey_master",
+        "keyboard_id": "rosey_keyboard"
+    },
     "robot": {
         "type": "lekiwi",
         "cameras": {
             "front": {
                 "type": "opencv",
-                "index_or_path": "/dev/video0",
+                "index_or_path": "/dev/video1",
                 "width": 640,
                 "height": 480,
                 "fps": 30,
-                "rotation": "ROTATE_180"
+                "rotation": "ROTATE_90"
             },
             "wrist": {
                 "type": "opencv",
-                "index_or_path": "/dev/video1",
+                "index_or_path": "/dev/video0",
                 "width": 640,
                 "height": 480,
                 "fps": 30
@@ -21,7 +27,7 @@
         "id": "rosey"
     },
     "dataset": {
-        "repo_id": "nikx-vla/eval_so100",
+        "repo_id": "nikx-vla/lekiwi_data",
         "single_task": "Put lego brick into the transparent box",
         "fps": 30,
         "episode_time_s": 60,

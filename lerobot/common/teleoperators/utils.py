@@ -45,5 +45,9 @@ def make_teleoperator_from_config(config: TeleoperatorConfig) -> Teleoperator:
         from tests.mocks.mock_teleop import MockTeleop
 
         return MockTeleop(config)
+    elif config.type == "lekiwi":
+        from .lekiwi import LeKiwiTeleop
+
+        return LeKiwiTeleop(config)
     else:
         raise ValueError(config.type)

@@ -8,9 +8,10 @@ import numpy as np
 import rerun as rr
 import torch
 import zmq
-from lerobot.common.robots.lekiwi import LeKiwiClient, LeKiwiClientConfig
+from lerobot.common.constants import OBS_IMAGES, OBS_STATE
+from lerobot.common.robots.lekiwi.config_lekiwi import LeKiwiClientConfig
+from lerobot.common.robots.lekiwi.lekiwi_client import LeKiwiClient
 from lerobot.common.utils.visualization_utils import _init_rerun
-from lerobot.common.constants import OBS_IMAGES
 
 def main():
     # Create output directory for saved images
@@ -48,6 +49,7 @@ def main():
 
     try:
         print("\nWaiting for camera streams...")
+        frame_counter = 0  # Initialize frame counter
         while True:
             try:
                 # Get observations from the robot (includes camera frames)
@@ -61,53 +63,45 @@ def main():
                 if not hasattr(main, "_printed_first_obs"):
                     print("\nReceived first observation with keys:", obs.keys())
                     print("\nFull observation data:")
-                    for key, value in obs.items():
-                        if isinstance(value, np.ndarray):
-                            print(f"{key}: numpy array with shape {value.shape} and dtype {value.dtype}")
-                        else:
-                            print(f"{key}: {type(value)} = {value}")
-                    main._printed_first_obs = True
-
+                    # Print state information
+                    if OBS_STATE in obs:
+                        print(f"\n{OBS_STATE}:")
+                        for key, value in obs[OBS_STATE].items():
+                            print(f"  {key}: {value}")
+                    
                 # Get the camera frames
-                front_frame = obs.get("observation.images.front")
-                wrist_frame = obs.get("observation.images.wrist")
-                
+                for key in obs:
+                    if key.startswith(OBS_IMAGES):
+                        frame = obs[key]
+                        if isinstance(frame, np.ndarray) and frame is not None:
+                            # Extract camera name from key (e.g. 'front' from 'observation.images.front')
+                            cam_name = key.split('.')[-1]
+                            
+                            # Convert from RGB to BGR for OpenCV
+                            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                            
+                            # Save frame
+                            frame_path = f"{output_dir}/{cam_name}_{frame_counter}.jpg"
+                            cv2.imwrite(frame_path, frame_bgr)
+
+                            # Show in rerun viewer (expects RGB)
+                            rr.log_image(f"cameras/{cam_name}", frame)
+                            rr.log_text(f"cameras/{cam_name}/path", frame_path)
+
+                frame_counter += 1
+
                 if not hasattr(main, "_printed_cameras"):
                     print("\nCamera data:")
-                    if front_frame is not None:
-                        print(f"  front: shape={front_frame.shape}, dtype={front_frame.dtype}")
-                    else:
-                        print("  front: None")
-                    if wrist_frame is not None:
-                        print(f"  wrist: shape={wrist_frame.shape}, dtype={wrist_frame.dtype}")
-                    else:
-                        print("  wrist: None")
+                    for key in obs:
+                        if key.startswith(OBS_IMAGES):
+                            if isinstance(obs[key], np.ndarray):
+                                print(f"  {key.split('.')[-1]}: shape={obs[key].shape}, dtype={obs[key].dtype}")
+                            else:
+                                print(f"  {key.split('.')[-1]}: {type(obs[key])}")
                     main._printed_cameras = True
+                    main._printed_first_obs = True
 
-                # Process and display camera frames
-                if front_frame is not None:
-                    # Convert PyTorch tensor to numpy array
-                    if isinstance(front_frame, torch.Tensor):
-                        front_frame = front_frame.cpu().numpy()
-                    # Log to rerun viewer
-                    rr.log("camera/front", rr.Image(front_frame))
-                    # Save image to disk
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                    filename = f"front_{timestamp}.jpg"
-                    filepath = os.path.join(output_dir, filename)
-                    cv2.imwrite(filepath, front_frame)
-                
-                if wrist_frame is not None:
-                    # Convert PyTorch tensor to numpy array
-                    if isinstance(wrist_frame, torch.Tensor):
-                        wrist_frame = wrist_frame.cpu().numpy()
-                    # Log to rerun viewer
-                    rr.log("camera/wrist", rr.Image(wrist_frame))
-                    # Save image to disk
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                    filename = f"wrist_{timestamp}.jpg"
-                    filepath = os.path.join(output_dir, filename)
-                    cv2.imwrite(filepath, wrist_frame)
+
 
             except zmq.error.ZMQError as e:
                 print(f"ZMQ Error while getting observation: {e}")

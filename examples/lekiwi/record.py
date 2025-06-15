@@ -1,6 +1,7 @@
 import time
 import numpy as np
 
+from lerobot.common.constants import OBS_IMAGES, OBS_STATE
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.common.datasets.utils import hw_to_dataset_features
 from lerobot.common.robots.lekiwi.config_lekiwi import LeKiwiClientConfig
@@ -52,11 +53,11 @@ while i < NB_CYCLES_CLIENT_CONNECTION:
     action_sent = robot.send_action(action)
     observation = robot.get_observation()
 
-    # Convert state dict to numpy array in the correct order
+    # Print received observation for debugging
     print("Full observation:", observation)
     
-    # Initialize state dict with zeros if empty
-    state_dict = observation.get('observation.state', {})
+    # Get state information
+    state_dict = observation.get(OBS_STATE, {})
     if not state_dict:
         print("Warning: No state information received, using zeros")
         state_dict = {k: 0.0 for k in robot._state_order}
@@ -64,12 +65,16 @@ while i < NB_CYCLES_CLIENT_CONNECTION:
     # Create state array with default values for missing keys
     state_array = np.array([state_dict.get(k, 0.0) for k in robot._state_order], dtype=np.float32)
 
+    # Get camera images
+    front_image = observation.get(f"{OBS_IMAGES}.front", np.zeros((640, 480, 3), dtype=np.uint8))
+    wrist_image = observation.get(f"{OBS_IMAGES}.wrist", np.zeros((640, 480, 3), dtype=np.uint8))
+    
     # Create the frame with the correct feature structure
     frame = {
         'action': np.array(list(action_sent.values()), dtype=np.float32),
         'observation.state': state_array,
-        'observation.images.front': np.zeros((640, 480, 3), dtype=np.uint8),  # Placeholder image
-        'observation.images.wrist': np.zeros((640, 480, 3), dtype=np.uint8)   # Placeholder image
+        'observation.images.front': front_image,
+        'observation.images.wrist': wrist_image
     }
     
     task = "Dummy Example Task Dataset"
