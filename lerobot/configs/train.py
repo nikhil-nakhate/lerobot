@@ -90,6 +90,10 @@ class TrainPipelineConfig(HubMixin):
             policy_path = Path(config_path).parent
             self.policy.pretrained_path = policy_path
             self.checkpoint_path = policy_path.parent
+            
+        # Allow repo_id to be either a string or a list of strings
+        if not isinstance(self.dataset.repo_id, (str, list)):
+            raise TypeError("dataset.repo_id must be either a string or a list of strings")
 
         if not self.job_name:
             if self.env is None:
