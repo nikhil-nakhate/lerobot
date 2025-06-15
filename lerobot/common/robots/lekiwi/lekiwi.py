@@ -114,7 +114,7 @@ class LeKiwi(Robot):
             raise DeviceAlreadyConnectedError(f"{self} already connected")
 
         self.bus.connect()
-        if not self.is_calibrated and calibrate:
+        if not self.calibration:
             self.calibrate()
 
         for cam in self.cameras.values():
