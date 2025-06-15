@@ -42,7 +42,6 @@ class LeKiwiHost:
         self.connection_time_s = config.connection_time_s
         self.watchdog_timeout_ms = config.watchdog_timeout_ms
         self.max_loop_freq_hz = config.max_loop_freq_hz
-        self.config.calibration_fpath = self.config.calibration_dir / f"rosey_master.json"
 
     def disconnect(self):
         self.zmq_observation_socket.close()
@@ -55,6 +54,7 @@ def main():
     init_logging()
     logging.info("Configuring LeKiwi")
     robot_config = LeKiwiConfig()
+    robot_config.calibration_fpath = robot_config.calibration_dir / f"rosey_master.json"
     robot = LeKiwi(robot_config)
 
     logging.info("Connecting LeKiwi")
