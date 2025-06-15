@@ -54,7 +54,8 @@ def main():
     init_logging()
     logging.info("Configuring LeKiwi")
     robot_config = LeKiwiConfig()
-    robot_config.calibration_fpath = robot_config.calibration_dir / f"rosey_master.json"
+    robot_config.calibration_dir = Path("/home/nikhil/.cache/huggingface/lerobot/calibration/robots/lekiwi/")
+    robot_config.calibration_fpath = robot_config.calibration_dir / f"rosey.json"
     robot = LeKiwi(robot_config)
 
     logging.info("Connecting LeKiwi")
