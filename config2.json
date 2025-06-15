@@ -14,7 +14,7 @@
                 "width": 640,
                 "height": 480,
                 "fps": 30,
-                "rotation": "ROTATE_90"
+                "rotation": "ROTATE_180"
             },
             "wrist": {
                 "type": "opencv",
@@ -31,7 +31,8 @@
         "single_task": "Put lego brick into the transparent box",
         "fps": 30,
         "episode_time_s": 60,
-        "video": true
+        "video": true,
+        "push_to_hub": true
     },
     "policy": null,
     "dataset_stats": {

@@ -70,7 +70,7 @@ class LeKiwiClientConfig(RobotConfig):
     port_zmq_observations: int = 5556
 
     # Local camera configuration
-    use_local_camera: bool = False
+    use_local_camera: bool = True
     local_camera_port: str = "/dev/video2"
     local_camera_fps: int = 30
     local_camera_width: int = 640

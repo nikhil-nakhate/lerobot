@@ -139,9 +139,6 @@ class KeyboardTeleop(Teleoperator):
         pass
 
     def disconnect(self) -> None:
-        if not self.is_connected:
-            raise DeviceNotConnectedError(
-                "KeyboardTeleop is not connected. You need to run `robot.connect()` before `disconnect()`."
-            )
+        # Only try to stop listener if it exists and was started
         if self.listener is not None:
             self.listener.stop()
