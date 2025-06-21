@@ -610,8 +610,6 @@ class VLAFlowMatching(nn.Module):
         lang_emb_dim = lang_emb.shape[-1]
         lang_emb = lang_emb * math.sqrt(lang_emb_dim)
 
-        lang_emb = lang_emb[:, -1, :, :]
-        lang_masks = lang_masks[:, -1, :]
         embs.append(lang_emb)
         pad_masks.append(lang_masks)
 

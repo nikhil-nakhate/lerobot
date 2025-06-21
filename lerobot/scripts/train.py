@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 # Copyright 2024 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,6 +23,7 @@ from pprint import pformat
 from typing import Any
 
 import torch
+from tqdm import tqdm
 from termcolor import colored
 from torch.amp import GradScaler
 from torch.optim import Optimizer
@@ -186,6 +190,7 @@ def train(cfg: TrainPipelineConfig):
     dl_iter = cycle(dataloader)
 
     policy.train()
+    logging.info("Begin training ...")
 
     train_metrics = {
         "loss": AverageMeter("loss", ":.3f"),
@@ -198,6 +203,8 @@ def train(cfg: TrainPipelineConfig):
     train_tracker = MetricsTracker(
         cfg.batch_size, dataset.num_frames, dataset.num_episodes, train_metrics, initial_step=step
     )
+    progress_bar = None
+    next_log_step = cfg.log_freq
 
     logging.info("Start offline training on a fixed dataset")
     for _ in range(step, cfg.steps):
@@ -227,6 +234,18 @@ def train(cfg: TrainPipelineConfig):
         is_log_step = cfg.log_freq > 0 and step % cfg.log_freq == 0
         is_saving_step = step % cfg.save_freq == 0 or step == cfg.steps
         is_eval_step = cfg.eval_freq > 0 and step % cfg.eval_freq == 0
+        
+        # Create new progress bar at each log step
+        if step > next_log_step or progress_bar is None:
+            if progress_bar is not None:
+                progress_bar.update(cfg.log_freq - progress_bar.n)
+                progress_bar.close()
+            prev_step = ((step - 1) // cfg.log_freq) * cfg.log_freq + 1
+            next_log_step = prev_step + cfg.log_freq - 1
+            progress_bar = tqdm(total=cfg.log_freq, desc=f'Training (steps {prev_step}-{next_log_step})')
+            progress_bar.update(step - prev_step)
+        else:
+            progress_bar.update(1)
 
         if is_log_step:
             logging.info(train_tracker)
@@ -280,6 +299,7 @@ def train(cfg: TrainPipelineConfig):
 
     if eval_env:
         eval_env.close()
+    progress_bar.close()
     logging.info("End of training")
 
 
