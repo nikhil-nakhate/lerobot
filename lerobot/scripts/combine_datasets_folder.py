@@ -5,6 +5,8 @@ import shutil
 import pandas as pd
 import argparse
 from typing import List
+from huggingface_hub import HfApi
+from pathlib import Path
 
 # Function to copy and renumber episodes
 def copy_and_renumber_episodes(dataset_paths: List[str], combined_path: str):
@@ -107,11 +109,15 @@ def combine_metadata(dataset_paths: List[str], combined_path: str):
             total_frames += info2["total_frames"]
             total_videos += info2["total_videos"]
     
-    # Update counts
+    # Update counts and ensure codebase_version exists
     info["total_episodes"] = total_episodes
     info["total_frames"] = total_frames
     info["total_videos"] = total_videos
     info["splits"]["train"] = f"0:{total_episodes}"
+    
+    # Get codebase_version from first dataset if it exists, otherwise use a default
+    codebase_version = info2.get("codebase_version", "0.1.0")
+    info["codebase_version"] = codebase_version
     
     # Write updated info.json
     with open(f"{combined_path}/meta/info.json", "w") as f:
@@ -121,12 +127,39 @@ def combine_metadata(dataset_paths: List[str], combined_path: str):
     shutil.copy2(f"{dataset_paths[0]}/meta/tasks.jsonl", f"{combined_path}/meta/tasks.jsonl")
 
 # Run the functions
+def create_huggingface_tag(combined_path: str):
+    """Create a tag on Hugging Face with the codebase version from info.json"""
+    try:
+        # Read the info.json to get codebase_version
+        with open(os.path.join(combined_path, "meta", "info.json"), "r") as f:
+            info = json.load(f)
+        
+        codebase_version = info.get("codebase_version")
+        if not codebase_version:
+            print("Warning: No codebase_version found in info.json")
+            return
+        
+        # Extract the repo_id from the path
+        # Assuming path format: /path/to/huggingface/username/repo_name
+        repo_name = Path(combined_path).name
+        username = Path(combined_path).parent.name
+        repo_id = f"{username}/{repo_name}"
+        
+        # Create the tag
+        hub_api = HfApi()
+        hub_api.create_tag(repo_id, tag=codebase_version, repo_type="dataset")
+        print(f"Created tag '{codebase_version}' for dataset '{repo_id}'")
+    except Exception as e:
+        print(f"Warning: Failed to create Hugging Face tag: {str(e)}")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Combine multiple robot datasets into one')
     parser.add_argument('--combined-path', type=str, required=True,
                         help='Path where the combined dataset will be stored')
     parser.add_argument('--dataset-paths', type=str, nargs='+', required=True,
                         help='List of paths to the datasets to combine')
+    parser.add_argument('--create-tag', action='store_true',
+                        help='Create a tag on Hugging Face with the codebase version')
     
     args = parser.parse_args()
     
@@ -137,3 +170,6 @@ if __name__ == "__main__":
     
     print("Done!")
     print(f"Combined dataset saved to: {args.combined_path}")
+    
+    if args.create_tag:
+        create_huggingface_tag(args.combined_path)

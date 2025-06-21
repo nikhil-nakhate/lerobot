@@ -27,7 +27,7 @@
         "id": "rosey"
     },
     "dataset": {
-        "repo_id": "nikx-vla/lekiwi_data",
+        "repo_id": "nikx-vla/eval_lekiwi",
         "single_task": "Put lego brick into the transparent box",
         "fps": 10,
         "episode_time_s": 30,
