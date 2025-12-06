@@ -137,7 +137,9 @@ class DatasetRecordConfig:
     # Limit the frames per second.
     fps: int = 30
     # Number of seconds for data recording for each episode.
-    episode_time_s: int | float = 60
+    # If None (default), episodes will be variable length and continue until exit_early is triggered (right arrow key).
+    # Set to a number (e.g., 60) for fixed-length episodes.
+    episode_time_s: int | float | None = None
     # Number of seconds for resetting the environment after each episode.
     reset_time_s: int | float = 60
     # Number of episodes to record.
@@ -251,7 +253,7 @@ def record_loop(
     policy: PreTrainedPolicy | None = None,
     preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]] | None = None,
     postprocessor: PolicyProcessorPipeline[PolicyAction, PolicyAction] | None = None,
-    control_time_s: int | None = None,
+    control_time_s: int | float | None = None,
     single_task: str | None = None,
     display_data: bool = False,
 ):
@@ -286,7 +288,11 @@ def record_loop(
 
     timestamp = 0
     start_episode_t = time.perf_counter()
-    while timestamp < control_time_s:
+    # If control_time_s is None, run until exit_early is triggered (variable length episodes)
+    # Otherwise, run for the specified duration (fixed length episodes)
+    if control_time_s is None:
+        logging.info("Variable-length episode mode: Press right arrow key to end episode")
+    while control_time_s is None or timestamp < control_time_s:
         start_loop_t = time.perf_counter()
 
         if events["exit_early"]:
