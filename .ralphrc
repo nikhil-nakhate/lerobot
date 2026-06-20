@@ -1,0 +1,52 @@
+# .ralphrc - Ralph project configuration
+# Docs: https://github.com/frankbria/ralph-claude-code
+# Feature: XLeRobot Safe Manipulation Sequence (see .ralph/specs/requirements.md)
+
+# =============================================================================
+# PROJECT IDENTIFICATION
+# =============================================================================
+PROJECT_NAME="xlerobot-safe-manipulation"
+PROJECT_TYPE="python"
+
+# =============================================================================
+# LOOP SETTINGS
+# =============================================================================
+MAX_CALLS_PER_HOUR=100
+CLAUDE_TIMEOUT_MINUTES=15
+CLAUDE_OUTPUT_FORMAT="json"
+
+# =============================================================================
+# TOOL PERMISSIONS
+# Safe git subcommands only. Allow ruff + pytest + the dry-run script.
+# Deliberately NO permission to run the script with --execute (hardware motion).
+# =============================================================================
+ALLOWED_TOOLS="Write,Read,Edit,Grep,Glob,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git checkout *),Bash(git branch *),Bash(ruff *),Bash(pytest *),Bash(python examples/xlerobot/safe_manipulation_sequence.py),Bash(PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py)"
+
+# =============================================================================
+# SESSION MANAGEMENT
+# =============================================================================
+SESSION_CONTINUITY=true
+SESSION_EXPIRY_HOURS=24
+
+# =============================================================================
+# TASK SOURCES
+# =============================================================================
+TASK_SOURCES="local"
+
+# =============================================================================
+# CIRCUIT BREAKER THRESHOLDS
+# =============================================================================
+CB_NO_PROGRESS_THRESHOLD=3
+CB_SAME_ERROR_THRESHOLD=5
+CB_OUTPUT_DECLINE_THRESHOLD=70
+CB_COOLDOWN_MINUTES=30
+CB_AUTO_RESET=false
+
+# =============================================================================
+# ADVANCED
+# =============================================================================
+CLAUDE_AUTO_UPDATE=false
+RALPH_VERBOSE=false
+
+# Optional sections in fix_plan.md that do NOT block Ralph's exit
+OPTIONAL_SECTIONS="Optional,Future,Future Enhancements,Nice to Have"
