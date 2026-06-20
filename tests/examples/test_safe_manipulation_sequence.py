@@ -120,17 +120,49 @@ def test_expected_default_plan_shape():
 # --------------------------------------------------------------------------- #
 # Helpers / fakes
 # --------------------------------------------------------------------------- #
+class _FakeCalibPath:
+    """Stand-in for ``robot.calibration_fpath`` controlling ``.is_file()``."""
+
+    def __init__(self, exists: bool):
+        self._exists = exists
+
+    def is_file(self) -> bool:
+        return self._exists
+
+    def __str__(self) -> str:
+        return "<fake-calibration-path>"
+
+
 class _RecordingRobot:
     """Fake robot recording calls; simulates perfect arm tracking."""
 
-    def __init__(self, home_positions, raise_on_send_index=None):
+    def __init__(
+        self,
+        home_positions,
+        raise_on_send_index=None,
+        *,
+        calib_exists=True,
+        calibrated=True,
+        robot_id="testbot",
+    ):
         self._pos = {f"{j}.pos": v for j, v in home_positions.items()}
         self.actions = []
         self.calls = []
         self._raise_on = raise_on_send_index
+        self.id = robot_id
+        self.calibration_fpath = _FakeCalibPath(calib_exists)
+        self._calibrated = calibrated
+        self.is_connected = False
+        self.connect_calibrate_args = []
 
-    def connect(self):
+    def connect(self, calibrate=True):
         self.calls.append("connect")
+        self.connect_calibrate_args.append(calibrate)
+        self.is_connected = True
+
+    @property
+    def is_calibrated(self):
+        return self._calibrated
 
     def get_observation(self):
         obs = dict(self._pos)
@@ -152,6 +184,23 @@ class _RecordingRobot:
 
     def disconnect(self):
         self.calls.append("disconnect")
+        self.is_connected = False
+
+
+def _patch_driver(monkeypatch, fake):
+    """Patch the lazily-imported XLerobot/XLerobotConfig with fakes."""
+    captured = {}
+
+    class _FakeConfig:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    import lerobot.robots.xlerobot as xle
+
+    monkeypatch.setattr(sms.time, "sleep", _no_sleep)
+    monkeypatch.setattr(xle, "XLerobot", lambda config: fake)
+    monkeypatch.setattr(xle, "XLerobotConfig", _FakeConfig)
+    return captured
 
 
 def _no_sleep(_):
@@ -196,17 +245,7 @@ def test_dry_run_simrobot_returns_to_home():
 def test_execute_only_commands_shoulder_lift_and_zero_lateral(monkeypatch):
     home = dict.fromkeys(sms.ARM_JOINTS, 0.0)
     fake = _RecordingRobot(home)
-
-    class _FakeConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    monkeypatch.setattr(sms.time, "sleep", _no_sleep)
-    # Patch the lazy import target.
-    import lerobot.robots.xlerobot as xle
-
-    monkeypatch.setattr(xle, "XLerobot", lambda config: fake)
-    monkeypatch.setattr(xle, "XLerobotConfig", _FakeConfig)
+    _patch_driver(monkeypatch, fake)
 
     rc = sms.main(["--execute", "--yes"], log=lambda *_: None)
     assert rc == 0
@@ -225,23 +264,14 @@ def test_execute_only_commands_shoulder_lift_and_zero_lateral(monkeypatch):
     assert fake.calls[-1] == "disconnect"
 
 
-def test_execute_sets_max_relative_target(monkeypatch):
+def test_execute_sets_id_and_max_relative_target(monkeypatch):
     home = dict.fromkeys(sms.ARM_JOINTS, 0.0)
     fake = _RecordingRobot(home)
-    captured = {}
+    captured = _patch_driver(monkeypatch, fake)
 
-    class _FakeConfig:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
-
-    monkeypatch.setattr(sms.time, "sleep", _no_sleep)
-    import lerobot.robots.xlerobot as xle
-
-    monkeypatch.setattr(xle, "XLerobot", lambda config: fake)
-    monkeypatch.setattr(xle, "XLerobotConfig", _FakeConfig)
-
-    sms.main(["--execute", "--yes"], log=lambda *_: None)
+    sms.main(["--execute", "--yes", "--robot-id", "demo7"], log=lambda *_: None)
     assert captured["max_relative_target"] == sms.MAX_RELATIVE_TARGET
+    assert captured["id"] == "demo7"
 
 
 # --------------------------------------------------------------------------- #
@@ -250,16 +280,7 @@ def test_execute_sets_max_relative_target(monkeypatch):
 def test_execute_failure_still_stops_and_disconnects(monkeypatch):
     home = dict.fromkeys(sms.ARM_JOINTS, 0.0)
     fake = _RecordingRobot(home, raise_on_send_index=1)  # fail mid arm phase
-
-    class _FakeConfig:
-        def __init__(self, **kwargs):
-            pass
-
-    monkeypatch.setattr(sms.time, "sleep", _no_sleep)
-    import lerobot.robots.xlerobot as xle
-
-    monkeypatch.setattr(xle, "XLerobot", lambda config: fake)
-    monkeypatch.setattr(xle, "XLerobotConfig", _FakeConfig)
+    _patch_driver(monkeypatch, fake)
 
     with pytest.raises(RuntimeError):
         sms.main(["--execute", "--yes"], log=lambda *_: None)
@@ -267,6 +288,65 @@ def test_execute_failure_still_stops_and_disconnects(monkeypatch):
     # Even on failure, the safety finally ran in order.
     assert "stop_base" in fake.calls
     assert fake.calls[-1] == "disconnect"
+
+
+# --------------------------------------------------------------------------- #
+# Calibration restore / calibrate
+# --------------------------------------------------------------------------- #
+def test_execute_restores_calibration_noninteractively(monkeypatch):
+    home = dict.fromkeys(sms.ARM_JOINTS, 0.0)
+    fake = _RecordingRobot(home, calib_exists=True)
+    _patch_driver(monkeypatch, fake)
+
+    rc = sms.main(["--execute", "--yes"], log=lambda *_: None)
+    assert rc == 0
+    # Restore path connects with calibrate=False and never recalibrates.
+    assert fake.connect_calibrate_args == [False]
+
+
+def test_execute_calibrate_flag_runs_interactive_calibration(monkeypatch):
+    home = dict.fromkeys(sms.ARM_JOINTS, 0.0)
+    # No saved file, but --calibrate is allowed to proceed and create one.
+    fake = _RecordingRobot(home, calib_exists=False)
+    _patch_driver(monkeypatch, fake)
+
+    rc = sms.main(["--execute", "--yes", "--calibrate"], log=lambda *_: None)
+    assert rc == 0
+    assert fake.connect_calibrate_args == [True]
+
+
+def test_execute_aborts_when_no_calibration_and_not_calibrating(monkeypatch):
+    home = dict.fromkeys(sms.ARM_JOINTS, 0.0)
+    fake = _RecordingRobot(home, calib_exists=False)
+    _patch_driver(monkeypatch, fake)
+
+    rc = sms.main(["--execute", "--yes"], log=lambda *_: None)
+    assert rc == 2
+    # Aborted before any hardware action.
+    assert "connect" not in fake.calls
+    assert fake.actions == []
+
+
+def test_execute_aborts_when_not_calibrated_after_connect(monkeypatch):
+    home = dict.fromkeys(sms.ARM_JOINTS, 0.0)
+    fake = _RecordingRobot(home, calib_exists=True, calibrated=False)
+    _patch_driver(monkeypatch, fake)
+
+    with pytest.raises(SystemExit):
+        sms.main(["--execute", "--yes"], log=lambda *_: None)
+    # Connected, then safely torn down without moving.
+    assert "connect" in fake.calls
+    assert fake.actions == []
+    assert fake.calls[-1] == "disconnect"
+
+
+def test_auto_input_answers_and_restores(monkeypatch):
+    # _auto_input should feed the queued reply to input() then restore builtins.input.
+    original = sms.builtins.input
+    with sms._auto_input(["hello"], log=lambda *_: None):
+        assert input("prompt? ") == "hello"
+        assert input("again? ") == ""  # exhausted -> empty default
+    assert sms.builtins.input is original
 
 
 # --------------------------------------------------------------------------- #

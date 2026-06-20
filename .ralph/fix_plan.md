@@ -86,6 +86,10 @@ Test file:   `tests/examples/test_safe_manipulation_sequence.py`
 ## Completed
 - [x] PRD + Ralph scaffold authored (`.ralph/specs/requirements.md`, this plan,
       `PROMPT.md`, `AGENT.md`, `.ralphrc`).
+- [x] **US-008 — Calibration restore/calibrate option** (`--robot-id`, `--calibrate`):
+      non-interactive restore of a saved calibration file, interactive
+      (re)calibration on demand, and a pre-connect abort (rc 2) with guidance when
+      no calibration exists. Verified on real hardware (gate aborts before motion).
 
 ## Notes
 - ONE story per loop. Search before assuming anything is unimplemented.

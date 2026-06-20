@@ -19,9 +19,16 @@ planner unit tests still work as long as `numpy` and the `lerobot` package impor
 # Dry-run (DEFAULT — no hardware, safe to run in the loop / CI)
 PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py
 
-# Real motion (HUMAN ONLY — robot must be connected, calibrated, on a clear surface)
-PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py --execute
+# Real motion (HUMAN ONLY — robot must be connected, on a clear surface)
+# First time: calibrate once and save under --robot-id
+PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py --execute --calibrate --robot-id xlerobot
+# After that: restore the saved calibration (non-interactive)
+PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py --execute --robot-id xlerobot
 ```
+
+Calibration files live at
+`~/.cache/huggingface/lerobot/calibration/robots/xlerobot/<robot-id>.json`. With no
+saved file and no `--calibrate`, the script aborts (rc 2) before any motion.
 
 ## Quality Gates (run for files you touched)
 ```bash

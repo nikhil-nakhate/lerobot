@@ -38,20 +38,34 @@ Usage:
     # Dry-run (default, no hardware)
     PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py
 
-    # Real motion (human only: robot connected, calibrated, on a clear surface)
-    PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py --execute
+    # FIRST real run: calibrate once (interactive) and save it under --robot-id
+    PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py \
+        --execute --calibrate --robot-id xlerobot
+
+    # SUBSEQUENT runs: restore the saved calibration non-interactively
+    PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py \
+        --execute --robot-id xlerobot
 
     # Override ports / isolate a subsystem
     PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py --execute \
         --port1 /dev/ttyACM0 --port2 /dev/ttyACM1
     PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py --arms-only
     PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py --base-only
+
+Calibration:
+    The driver stores calibration at
+    ``~/.cache/huggingface/lerobot/calibration/robots/xlerobot/<robot-id>.json``.
+    Pass ``--calibrate`` to (re)create it interactively; omit it to restore the
+    saved file with no prompts. If no file exists and ``--calibrate`` is not given,
+    the script aborts before any motion with instructions.
 """
 
 from __future__ import annotations
 
 import argparse
+import builtins
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 # --------------------------------------------------------------------------- #
@@ -78,6 +92,7 @@ ARM_JOINTS = ("left_arm_shoulder_lift", "right_arm_shoulder_lift")
 
 DEFAULT_PORT1 = "/dev/ttyACM0"  # bus1: left arm + head
 DEFAULT_PORT2 = "/dev/ttyACM1"  # bus2: right arm + base
+DEFAULT_ROBOT_ID = "xlerobot"  # calibration file is <robot-id>.json under the cache
 
 
 # --------------------------------------------------------------------------- #
@@ -397,6 +412,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--port1", default=DEFAULT_PORT1, help="bus1 port (left arm + head)")
     parser.add_argument("--port2", default=DEFAULT_PORT2, help="bus2 port (right arm + base)")
+    parser.add_argument(
+        "--robot-id",
+        default=DEFAULT_ROBOT_ID,
+        help="Robot id selecting the calibration file <robot-id>.json (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="Run interactive calibration and save it, instead of restoring a saved file.",
+    )
     parser.add_argument("--arms-only", action="store_true", help="Run only the arm motion.")
     parser.add_argument("--base-only", action="store_true", help="Run only the base motion.")
     return parser
@@ -415,6 +440,66 @@ def _run_dry(args, *, log=print) -> int:
     return 0
 
 
+@contextmanager
+def _auto_input(responses, *, log=print):
+    """Temporarily answer ``input()`` prompts automatically.
+
+    Used ONLY to auto-accept the driver's single "restore calibration?" prompt so
+    re-runs are non-interactive. Never wrap an interactive *calibration* in this -
+    the calibration steps need real human input.
+    """
+    original = builtins.input
+    it = iter(responses)
+
+    def _fake_input(prompt: str = "") -> str:
+        try:
+            reply = next(it)
+        except StopIteration:
+            reply = ""
+        log(f"{prompt}{reply!r}  [auto]")
+        return reply
+
+    builtins.input = _fake_input
+    try:
+        yield
+    finally:
+        builtins.input = original
+
+
+def _connect_with_calibration(robot, *, calibrate: bool, log=print) -> None:
+    """Connect the robot, either calibrating fresh or restoring a saved file.
+
+    Args:
+        robot: An ``XLerobot`` instance (already constructed with the desired id).
+        calibrate: If True, run the driver's interactive calibration and save it.
+            If False, restore the existing calibration file non-interactively.
+
+    Raises:
+        SystemExit: if restore is requested but no calibration file exists, or if
+            the robot is not calibrated after connecting.
+    """
+    fpath = robot.calibration_fpath
+    if calibrate:
+        log(f"Calibration: running INTERACTIVE calibration; will be saved to {fpath}")
+        log("Follow the on-screen prompts (move each joint through its range).")
+        robot.connect(calibrate=True)
+    elif fpath.is_file():
+        log(f"Calibration: restoring from {fpath} (no recalibration).")
+        # The restore branch of the driver asks one yes/ENTER question; auto-accept.
+        with _auto_input([""], log=log):
+            robot.connect(calibrate=False)
+    else:
+        raise SystemExit(
+            f"No calibration file found at {fpath}.\n"
+            f"Calibrate once first, e.g.:\n"
+            f"  PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py "
+            f"--execute --calibrate --robot-id {robot.id}"
+        )
+
+    if not robot.is_calibrated:
+        raise SystemExit("Robot reports NOT calibrated after connect; aborting before any motion.")
+
+
 def _run_execute(args, *, log=print, input_fn=input) -> int:
     """Execute path: connect, run, and ALWAYS stop_base()+disconnect() in finally."""
     # Imported here so dry-run has no hardware import dependency.
@@ -423,9 +508,31 @@ def _run_execute(args, *, log=print, input_fn=input) -> int:
     do_arms = not args.base_only
     do_base = not args.arms_only
 
+    config = XLerobotConfig(
+        id=args.robot_id,
+        port1=args.port1,
+        port2=args.port2,
+        max_relative_target=MAX_RELATIVE_TARGET,
+    )
+    robot = XLerobot(config)
+
+    # Pre-connect calibration gate (no hardware action yet, so no finally needed).
+    if not args.calibrate and not robot.calibration_fpath.is_file():
+        log(f"No calibration file found at {robot.calibration_fpath}.")
+        log("Run once with --calibrate to create it, e.g.:")
+        log(
+            f"  PYTHONPATH=src python examples/xlerobot/safe_manipulation_sequence.py "
+            f"--execute --calibrate --robot-id {args.robot_id}"
+        )
+        return 2
+
     log("!" * 70)
     log("WARNING: --execute will PHYSICALLY MOVE the robot.")
-    log("Ensure the robot is connected, calibrated, and on a clear ~0.5 m surface.")
+    log("Ensure the robot is connected and on a clear ~0.5 m surface.")
+    if args.calibrate:
+        log("Mode: CALIBRATE then run (interactive calibration follows).")
+    else:
+        log(f"Mode: restore calibration '{args.robot_id}' then run.")
     log("!" * 70)
     if not args.yes:
         reply = input_fn("Type ENTER to proceed, or Ctrl-C to abort: ")
@@ -433,14 +540,8 @@ def _run_execute(args, *, log=print, input_fn=input) -> int:
             log("Aborted by operator.")
             return 1
 
-    config = XLerobotConfig(
-        port1=args.port1,
-        port2=args.port2,
-        max_relative_target=MAX_RELATIVE_TARGET,
-    )
-    robot = XLerobot(config)
     try:
-        robot.connect()
+        _connect_with_calibration(robot, calibrate=args.calibrate, log=log)
         obs = robot.get_observation()
         home_positions = {joint: obs[f"{joint}.pos"] for joint in ARM_JOINTS}
         plan = plan_sequence(home_positions)
@@ -452,11 +553,17 @@ def _run_execute(args, *, log=print, input_fn=input) -> int:
         log("\nInterrupted - stopping base and disconnecting safely.")
         return 130
     finally:
-        # Guaranteed safe shutdown on every path (US-006).
-        try:
-            robot.stop_base()
-        finally:
-            robot.disconnect()
+        # Guaranteed safe shutdown on every path (US-006). Best-effort: never let
+        # a teardown error mask the original outcome or crash an aborted connect.
+        if getattr(robot, "is_connected", False):
+            try:
+                robot.stop_base()
+            except Exception as exc:  # noqa: BLE001
+                log(f"warning: stop_base() during teardown failed: {exc}")
+            try:
+                robot.disconnect()
+            except Exception as exc:  # noqa: BLE001
+                log(f"warning: disconnect() during teardown failed: {exc}")
 
 
 def main(argv: list[str] | None = None, *, log=print, input_fn=input) -> int:
