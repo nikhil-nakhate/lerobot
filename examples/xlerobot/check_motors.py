@@ -108,13 +108,66 @@ def check_bus(label: str, port: str, id_map: dict[str, int]) -> bool:
     return all_ok
 
 
+def detect_ports(log=print) -> tuple[str, str]:
+    """Auto-detect which serial port carries which bus, regardless of ttyACM* labels.
+
+    The head bus has 8 motors (ids 1-8); the base bus has 9 (ids 1-9, only it has
+    id 9). So id 9 uniquely identifies the base bus.
+
+    Returns:
+        (port1, port2) where port1 is the head bus (left arm + head) and port2 is
+        the base bus (right arm + base).
+
+    Raises:
+        SystemExit: if both buses can't be identified.
+    """
+    import glob
+
+    populated: dict[str, list[int]] = {}
+    for port in sorted(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")):
+        try:
+            bus = FeetechMotorsBus(port=port, motors={})
+            bus.connect(handshake=False)
+            bus.set_baudrate(1_000_000)
+            ids = sorted(bus.broadcast_ping() or {})
+            bus.disconnect(disable_torque=False)
+        except Exception:  # noqa: BLE001
+            ids = []
+        if ids:
+            populated[port] = ids
+
+    base = next((p for p, ids in populated.items() if 9 in ids), None)
+    head = next((p for p, ids in populated.items() if p != base and ids), None)
+    if not head or not base:
+        raise SystemExit(
+            f"Could not auto-detect both buses (found: {populated or 'nothing'}).\n"
+            "Expected one port with ids 1-8 (head) and one with ids 1-9 (base).\n"
+            "Pass --port1/--port2 explicitly, or check power/cabling."
+        )
+    log(f"Auto-detected: port1 (head bus) = {head}, port2 (base bus) = {base}")
+    return head, base
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Read-only XLeRobot motor reachability check.")
-    parser.add_argument("--port1", default=DEFAULT_PORT1, help="bus1 (left arm + head)")
-    parser.add_argument("--port2", default=DEFAULT_PORT2, help="bus2 (right arm + base)")
+    parser.add_argument("--port1", default=None, help="bus1 (left arm + head); auto-detected if omitted")
+    parser.add_argument("--port2", default=None, help="bus2 (right arm + base); auto-detected if omitted")
     args = parser.parse_args(argv)
 
     print("XLeRobot motor reachability check (read-only: no torque, no motion)")
+
+    # Auto-detect when the user did not pin both ports (handles ttyACM* renumbering).
+    if args.port1 is None and args.port2 is None:
+        try:
+            args.port1, args.port2 = detect_ports()
+        except SystemExit as exc:
+            print(str(exc))
+            print(f"Falling back to defaults: port1={DEFAULT_PORT1}, port2={DEFAULT_PORT2}")
+            args.port1, args.port2 = DEFAULT_PORT1, DEFAULT_PORT2
+    else:
+        args.port1 = args.port1 or DEFAULT_PORT1
+        args.port2 = args.port2 or DEFAULT_PORT2
+
     ok1 = check_bus("bus1: left arm + head", args.port1, BUS1_MOTORS)
     ok2 = check_bus("bus2: right arm + base", args.port2, BUS2_MOTORS)
 

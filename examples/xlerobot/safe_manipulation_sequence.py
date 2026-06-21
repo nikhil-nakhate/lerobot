@@ -422,9 +422,49 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run interactive calibration and save it, instead of restoring a saved file.",
     )
+    parser.add_argument(
+        "--auto-ports",
+        action="store_true",
+        help="Auto-detect which serial port is the head bus (8 motors) vs base bus (9), "
+        "overriding --port1/--port2. Robust to /dev/ttyACM* renumbering.",
+    )
     parser.add_argument("--arms-only", action="store_true", help="Run only the arm motion.")
     parser.add_argument("--base-only", action="store_true", help="Run only the base motion.")
     return parser
+
+
+def detect_ports(log=print) -> tuple[str, str]:
+    """Auto-detect (port1=head bus with ids 1-8, port2=base bus with ids 1-9).
+
+    Only the base bus has id 9, so it is the unique discriminator. Raises SystemExit
+    if both buses cannot be identified.
+    """
+    import glob
+
+    from lerobot.motors.feetech import FeetechMotorsBus
+
+    populated: dict[str, list[int]] = {}
+    for port in sorted(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")):
+        try:
+            bus = FeetechMotorsBus(port=port, motors={})
+            bus.connect(handshake=False)
+            bus.set_baudrate(1_000_000)
+            ids = sorted(bus.broadcast_ping() or {})
+            bus.disconnect(disable_torque=False)
+        except Exception:  # noqa: BLE001
+            ids = []
+        if ids:
+            populated[port] = ids
+
+    base = next((p for p, ids in populated.items() if 9 in ids), None)
+    head = next((p for p, ids in populated.items() if p != base and ids), None)
+    if not head or not base:
+        raise SystemExit(
+            f"Could not auto-detect both buses (found: {populated or 'nothing'}). "
+            "Pass --port1/--port2 explicitly or run check_motors.py."
+        )
+    log(f"Auto-detected ports: port1 (head) = {head}, port2 (base) = {base}")
+    return head, base
 
 
 def _run_dry(args, *, log=print) -> int:
@@ -508,10 +548,14 @@ def _run_execute(args, *, log=print, input_fn=input) -> int:
     do_arms = not args.base_only
     do_base = not args.arms_only
 
+    port1, port2 = args.port1, args.port2
+    if args.auto_ports:
+        port1, port2 = detect_ports(log=log)
+
     config = XLerobotConfig(
         id=args.robot_id,
-        port1=args.port1,
-        port2=args.port2,
+        port1=port1,
+        port2=port2,
         max_relative_target=MAX_RELATIVE_TARGET,
     )
     robot = XLerobot(config)
