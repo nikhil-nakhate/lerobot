@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lerobot-vr-teleop"
+version = "0.1.0"
+description = "WebXR/VR teleoperation for the XLeRobot dual-arm mobile manipulator"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "websockets",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# XLeVR itself is provided by the third_party/XLeRobot git submodule, not packaged here.
